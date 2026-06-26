@@ -1,0 +1,11 @@
+[project]
+name = "eurotherm-2404-controller"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "minimalmodbus>=2.1.1",
+    "pyqt6>=6.11.0",
+    "pyqtgraph>=0.14.0",
+]
