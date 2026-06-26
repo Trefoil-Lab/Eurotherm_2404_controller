@@ -16,10 +16,12 @@ from PyQt6 import QtGui
 import pyqtgraph as pg
 import numpy as np
 from MainWindow import Ui_MainWindow
-from SegmentDialog import Ui_Dialog
+from SegmentDialog import Ui_Dialog as Ui_SegDialog
 from SegmentWidget import Ui_Form
+from ConnectionDialog import Ui_Dialog as Ui_ConnDialog
 
 WINDOW_TITLE = 'Eurotherm 2404 Controller'
+CONNECT_DIALOG_TITLE = 'Connection Details'
 SEGMENTS_DIALOG_TITLE = 'Configure Segments'
 
 def main():
@@ -90,7 +92,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     # signal handlers #
     ###################
 
-class SegmentDialog(QDialog, Ui_Dialog):
+class ConnectionDialog(QDialog, Ui_ConnDialog):
+    def __init__(self):
+        super().__init__()
+        self.setupUi(self)
+
+        ###############################
+        # custom initialization below #
+        ###############################
+
+        self.setWindowTitle(CONNECT_DIALOG_TITLE)
+
+    def accept(self):
+        # TODO
+        return super().accept()
+
+class SegmentDialog(QDialog, Ui_SegDialog):
     def __init__(self, count : int):
         super().__init__()
         self.setupUi(self)
@@ -106,6 +123,10 @@ class SegmentDialog(QDialog, Ui_Dialog):
             w = SegmentWidget(i+1)
             segboxes.append(w)
             self.scrollAreaWidgetContents.layout().addWidget(w)
+
+    def accept(self):
+        # TODO
+        return super().accept()
 
 class SegmentWidget(Ui_Form, QWidget):
     def __init__(self, num : int):
