@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6 import QtGui
 import pyqtgraph as pg
 import numpy as np
-from util import GuiSignals, ControlSignals
+from util import GuiSignals, ControlSignals, SegmentType, Segment, Data
 from control import ControlRunner
 from MainWindow import Ui_MainWindow
 from SegmentDialog import Ui_Dialog as Ui_SegDialog
@@ -95,12 +95,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if self.control.status.running == True:
             self.gui_signals.pauseSig.emit()
         else:
+            self.control.segments = self.segments
             self.gui_signals.startSig.emit()
 
     def segmentsConfigPress(self):
         print('segment config time!')
-        dlg = SegmentDialog(self.segmentCountSpinBox.value())
+        dlg = SegmentDialog(self.segmentCountSpinBox.value(), self)
         dlg.exec()
+
+        # TODO graph segments preview
 
     def jumpPress(self):
         self.jumpPushButton.setDisabled(True) # prevent multiple presses
@@ -121,8 +124,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     # signal handlers #
     ###################
 
-    def procStatus(self):
-        # TODO receive status updates from control thread
+    def procStatus(self, time_rem : float, seg_count : int, data : Data):
+        # TODO receive status updates from control thread, display on status bar
+        # TODO graph process values / set points
         pass
 
     def jumping(self):
@@ -140,6 +144,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def starting(self):
         self.statusbar.showMessage('Starting...')
+        self.segmentConfigButton.setDisabled(True)
 
     def started(self):
         self.statusbar.showMessage('Started!', 1000)
@@ -149,6 +154,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def stopped(self):
         self.statusbar.showMessage('Stopped!', 1000)
+        self.segmentConfigButton.setDisabled(False)
 
     def pausing(self):
         self.statusbar.showMessage('Pausing...')
@@ -179,7 +185,7 @@ class ConnectionDialog(QDialog, Ui_ConnDialog):
         return super().accept()
 
 class SegmentDialog(QDialog, Ui_SegDialog):
-    def __init__(self, count : int):
+    def __init__(self, count : int, main_window : MainWindow):
         super().__init__()
         self.setupUi(self)
 
@@ -189,14 +195,35 @@ class SegmentDialog(QDialog, Ui_SegDialog):
 
         self.setWindowTitle(SEGMENTS_DIALOG_TITLE)
 
-        segboxes : list[SegmentWidget] = []
+        self.main_window = main_window
+        self.segboxes : list[SegmentWidget] = []
         for i in range(count):
             w = SegmentWidget(i+1)
-            segboxes.append(w)
+            self.segboxes.append(w)
             self.scrollAreaWidgetContents.layout().addWidget(w)
 
     def accept(self):
-        # TODO
+        segments = []
+        for seg in self.segboxes:
+            seg_type = SegmentType.HOLD
+            if seg.rampRadioButton.isChecked():
+                seg_type = SegmentType.RAMP
+
+            segments.append(
+                Segment(
+                    seg_type, # type
+                    seg.targetDoubleSpinBox.value(), # target value
+                    seg.rateDoubleSpinBox.value(), # ramp rate
+                    seg.timeDoubleSpinBox.value() # hold time
+                )
+            )
+
+        # last item of segments list is end segment
+        segments.append(Segment(SegmentType.END, None, None, None))
+
+        self.main_window.segments = segments
+        self.main_window.startStopPushButton.setDisabled(False)
+
         return super().accept()
 
 class SegmentWidget(Ui_Form, QWidget):

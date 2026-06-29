@@ -30,12 +30,12 @@ class Data:
 
 class GuiSignals(QObject):
     jumpSig = pyqtSignal()
-    startSig = pyqtSignal(list[Segment])
+    startSig = pyqtSignal()
     stopSig = pyqtSignal()
     pauseSig = pyqtSignal()
     resumeSig = pyqtSignal()
     connectSig = pyqtSignal(str, int)
-    # disconnectSig = pyqtSignal()
+    exitSign = pyqtSignal()
 
 class ControlSignals(QObject):
     connectingSig = pyqtSignal()
@@ -46,7 +46,7 @@ class ControlSignals(QObject):
     stoppedSig = pyqtSignal()
     jumpingSig = pyqtSignal()
     jumpedSig = pyqtSignal()
-    statusSig = pyqtSignal()
+    statusSig = pyqtSignal(float, int, Data)
 
 class ProcessSignals(QObject):
-    dataSig = pyqtSignal()
+    dataSig = pyqtSignal(Data)

@@ -32,13 +32,14 @@ class ControlRunner(QRunnable):
         self.status = Status()
 
         # events for communication with process control thread
+        self.process_signals = ProcessSignals()
         self.pause_event = Event()
         self.stop_event = Event()
         self.jump_event = Event()
 
         # connect gui events to handlers
         self.gui_signals.jumpSig.connect(self.jump)
-        self.gui_signals.startSig.connect(self.connect)
+        self.gui_signals.startSig.connect(self.start)
         self.gui_signals.stopSig.connect(self.stop)
         self.gui_signals.pauseSig.connect(self.pause)
         self.gui_signals.resumeSig.connect(self.resume)
@@ -64,12 +65,30 @@ class ControlRunner(QRunnable):
         )
         self.signals.connectedSig.emit()
 
-    def start(self, segments : list[Segment]):
-        # TODO
-        pass
+    def start(self):
+        self.signals.startingSig.emit()
+
+        self.process_thread = ProcessRunner(
+            self.eurotherm,
+            self.segments,
+            self.process_signals,
+            self.signals,
+            self.stop_event,
+            self.pause_event,
+            self.jump_event
+        )
+        self.process_thread.start()
+
+        self.status.running = True
+        self.signals.startedSig.emit()
 
     def stop(self):
+        self.signals.stoppingSig.emit()
+
         self.stop_event.set()
+        self.process_thread.join() # wait for process thread to stop
+
+        self.signals.stoppedSig.emit()
 
     def pause(self):
         self.pause_event.set()
@@ -78,11 +97,8 @@ class ControlRunner(QRunnable):
         self.pause_event.clear()
 
     def jump(self):
+        self.signals.jumpingSig.emit()
         self.jump_event.set()
-
-    def fire(self):
-        # TODO
-        pass
 
     ###################################
     # process control thread handlers #
