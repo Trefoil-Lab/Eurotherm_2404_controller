@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 from PyQt6 import QtGui
 import pyqtgraph as pg
 import numpy as np
+from util import GuiSignals, ControlSignals
+from control import ControlRunner
 from MainWindow import Ui_MainWindow
 from SegmentDialog import Ui_Dialog as Ui_SegDialog
 from SegmentWidget import Ui_Form
@@ -43,6 +45,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self.setWindowTitle(WINDOW_TITLE)
 
+        # signals object
+        self.gui_signals = GuiSignals()
+
+        # create control runner
+        self.control_signals = ControlSignals()
+        self.control = ControlRunner(self.gui_signals, self.control_signals)
+
         # set up graph
         self.graph = pg.PlotWidget()
         self.graph.setSizePolicy(self.graphPlaceholder.sizePolicy())
@@ -57,31 +66,51 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # connect buttons to handlers
         self.segmentConfigButton.pressed.connect(self.segmentsConfigPress)
+        self.connectionPushButton.pressed.connect(self.connectPress)
+        self.startStopPushButton.pressed.connect(self.startStopPress)
+        self.jumpPushButton.pressed.connect(self.jumpPress)
+        self.pauseContinuePushButton.pressed.connect(self.pauseResumePress)
+
+        # connect signals from control thread to handlers
+        self.control_signals.connectingSig.connect(self.connecting)
+        self.control_signals.connectedSig.connect(self.connected)
+        self.control_signals.startingSig.connect(self.starting)
+        self.control_signals.startedSig.connect(self.started)
+        self.control_signals.stoppingSig.connect(self.stopping)
+        self.control_signals.stoppedSig.connect(self.stopped)
+        self.control_signals.jumpingSig.connect(self.jumping)
+        self.control_signals.jumpedSig.connect(self.jumped)
+        self.control_signals.statusSig.connect(self.procStatus) # status updates
 
     #######################
     # user input handlers #
     #######################
 
+    def connectPress(self):
+        dlg = ConnectionDialog(self, self.gui_signals)
+        dlg.exec()
+
     def startStopPress(self):
-        # TODO
-        print('start/stop pressed!')
+        self.startStopPushButton.setDisabled(True)
+        if self.control.status.running == True:
+            self.gui_signals.pauseSig.emit()
+        else:
+            self.gui_signals.startSig.emit()
 
     def segmentsConfigPress(self):
         print('segment config time!')
         dlg = SegmentDialog(self.segmentCountSpinBox.value())
         dlg.exec()
 
-    def firePress(self):
-        # TODO
-        print('fire press!')
-
     def jumpPress(self):
-        # TODO
-        print('jump pressed!')
+        self.jumpPushButton.setDisabled(True) # prevent multiple presses
+        self.gui_signals.jumpSig.emit()
 
     def pauseResumePress(self):
-        # TODO
-        print('pause/resume pressed!')
+        if self.control.status.paused == True:
+            self.gui_signals.pauseSig.emit()
+        else:
+            self.gui_signals.resumeSig.emit()
 
     def closeEvent(self, event):
         print('exiting...')
@@ -92,8 +121,43 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     # signal handlers #
     ###################
 
+    def procStatus(self):
+        # TODO receive status updates from control thread
+        pass
+
+    def jumping(self):
+        self.statusbar.showMessage('Jumping...')
+
+    def jumped(self):
+        self.statusbar.showMessage('Jumped!', 1000)
+        self.jumpPushButton.setDisabled(False)
+
+    def connecting(self):
+        self.statusbar.showMessage('Connecting...')
+
+    def connected(self):
+        self.statusbar.showMessage('Connected!', 1000)
+
+    def starting(self):
+        self.statusbar.showMessage('Starting...')
+
+    def started(self):
+        self.statusbar.showMessage('Started!', 1000)
+
+    def stopping(self):
+        self.statusbar.showMessage('Stopping...')
+
+    def stopped(self):
+        self.statusbar.showMessage('Stopped!', 1000)
+
+    def pausing(self):
+        self.statusbar.showMessage('Pausing...')
+
+    def paused(self):
+        self.statusbar.showMessage('Paused!', 1000)
+
 class ConnectionDialog(QDialog, Ui_ConnDialog):
-    def __init__(self):
+    def __init__(self, main_window : MainWindow, gui_signals : GuiSignals):
         super().__init__()
         self.setupUi(self)
 
@@ -101,10 +165,17 @@ class ConnectionDialog(QDialog, Ui_ConnDialog):
         # custom initialization below #
         ###############################
 
+        self.main_window = main_window
+        self.gui_signals = gui_signals
+
         self.setWindowTitle(CONNECT_DIALOG_TITLE)
 
     def accept(self):
-        # TODO
+        self.main_window.connectionPushButton.setDisabled(True)
+        self.gui_signals.connectSig.emit(
+            self.portLineEdit.text(),
+            self.addressSpinBox.value()
+        )
         return super().accept()
 
 class SegmentDialog(QDialog, Ui_SegDialog):
