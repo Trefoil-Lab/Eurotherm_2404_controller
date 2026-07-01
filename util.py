@@ -19,14 +19,15 @@ class Segment:
     target : float | None # deg C
     rate : float | None # deg C / sec
     time : float | None # hold time
+    entered : float | None # time hold entered, for internal use
 
 @dataclass
 class Data:
-    segment_type : SegmentType
+    segment : Segment
     segment_index : int
     set_point : float
     process_value : float
-    rate : float | None
+    paused : bool
 
 class GuiSignals(QObject):
     jumpSig = pyqtSignal()
@@ -44,9 +45,13 @@ class ControlSignals(QObject):
     startedSig = pyqtSignal()
     stoppingSig = pyqtSignal()
     stoppedSig = pyqtSignal()
+    pausingSig = pyqtSignal()
+    pausedSig = pyqtSignal()
+    resumingSig = pyqtSignal()
+    resumedSig = pyqtSignal()
     jumpingSig = pyqtSignal()
     jumpedSig = pyqtSignal()
-    statusSig = pyqtSignal(float, int, Data)
+    statusSig = pyqtSignal(str, Data)
 
 class ProcessSignals(QObject):
     dataSig = pyqtSignal(Data)

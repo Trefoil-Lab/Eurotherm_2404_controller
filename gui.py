@@ -162,6 +162,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def paused(self):
         self.statusbar.showMessage('Paused!', 1000)
 
+    def resuming(self):
+        self.statusbar.showMessage('Resuming...')
+
+    def resumed(self):
+        self.statusbar.showMessage('Resumed!', 1000)
+
 class ConnectionDialog(QDialog, Ui_ConnDialog):
     def __init__(self, main_window : MainWindow, gui_signals : GuiSignals):
         super().__init__()

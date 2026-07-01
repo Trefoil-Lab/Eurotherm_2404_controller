@@ -19,6 +19,7 @@ from util import (
 )
 
 RAMP_INTERVAL_S = 0.500
+LOOP_SLEEP_S = 0.05
 
 class ControlRunner(QRunnable):
     def __init__(
@@ -47,8 +48,6 @@ class ControlRunner(QRunnable):
 
     def run(self):
         print('Control thread starting.')
-
-        
 
         self.eventloop = QEventLoop()
         self.eventloop.exec()
@@ -91,9 +90,11 @@ class ControlRunner(QRunnable):
         self.signals.stoppedSig.emit()
 
     def pause(self):
+        self.signals.pausingSig.emit()
         self.pause_event.set()
 
     def resume(self):
+        self.signals.resumingSig.emit()
         self.pause_event.clear()
 
     def jump(self):
@@ -104,11 +105,29 @@ class ControlRunner(QRunnable):
     # process control thread handlers #
     ###################################
 
-    def receiveState(self):
-        # TODO receive ramp/hold status, rate, and process value from
+    def receiveState(self, data : Data):
+        # receive ramp/hold status, rate, and process value from
         #   process control thread. calculate estimated time remaining
         #   etc and forward to gui
-        pass
+        status = f'{data.segment_index + 1} '
+        if data.paused:
+            status += 'PAUSED '
+        status += f'{data.segment.segment_type.name}'
+        match data.segment.segment_type:
+            case SegmentType.RAMP:
+                rem = abs(data.set_point - data.segment.target) / abs(data.segment.rate)
+                status += f' to {data.segment.target} at {data.segment.rate}\N{DEGREE SIGN}C/s, {rem}s remaining'
+            case SegmentType.HOLD:
+                elapsed = time.monotonic - data.segment.entered
+                rem = data.segment.time - elapsed
+                status += f' {rem}s remaining'
+        
+        self.signals.statusSig.emit(
+            status, # status string
+            data.set_point,
+            data.process_value,
+            data.paused
+        )
 
 class ProcessRunner(Thread):
     def __init__(self,
@@ -129,23 +148,88 @@ class ProcessRunner(Thread):
         self.stop_event = stop_event
         self.pause_event = pause_event
         self.jump_event = jump_event
-        self.index = 0 # segment index
+
+        self.idx = 0 # segment index
+
+    def schedule_next(self, sc : sched.scheduler):
+        match self.segments[self.idx].segment_type:
+            case SegmentType.RAMP:
+                # we are ramping, so schedule next increment
+                sc.enter(RAMP_INTERVAL_S, 1, self.ramp, (sc,))
+            case SegmentType.HOLD:
+                # we are holding
+                self.segments[self.idx].entered = time.monotonic()
+                sc.enter(self.segments[self.idx].time, 1, self.hold_end, (sc,))
+
+    def ramp(self, sc : sched.scheduler):
+        if (abs(self.segments[self.idx].target - self.eurotherm.active_setpoint)
+        <= abs(RAMP_INTERVAL_S * self.segments[self.idx].rate)):
+            # we are within one step of the target, so just jump to it
+            self.eurotherm.active_setpoint = self.segments[self.idx].target
+            # go to next segment
+            self.idx += 1
+        elif self.segments[self.idx].target > self.eurotherm.active_setpoint:
+            # we are below the target, so increase set point
+            self.eurotherm.active_setpoint += RAMP_INTERVAL_S * self.segments[self.idx].rate
+        elif self.segments[self.idx].target < self.eurotherm.active_setpoint:
+            # we are above the target, so decrease set point
+            self.eurotherm.active_setpoint -= RAMP_INTERVAL_S * self.segments[self.idx].rate
+
+        self.schedule_next(sc) # schedule next change
+
+    def hold_end(self, sc : sched.scheduler):
+        # a hold has ended
+        self.idx += 1 # go to next segment
+        self.schedule_next(sc) # schedule next change
+
+    def send_data(self):
+        # send status information to control thread
+            self.process_signals.dataSig.emit(
+                Data(
+                    self.segments[self.idx],
+                    self.idx,
+                    self.eurotherm.active_setpoint,
+                    self.eurotherm.process_value,
+                    self.paused
+                )
+            )
 
     def run(self):
-        # TODO scheduler
+        sc = sched.scheduler(time.monotonic, time.sleep)
 
-        pause = False
+        self.paused = False
 
+        while not self.stop_event.is_set() and self.segments[self.idx].segment_type != SegmentType.END:
+            if self.paused == False:
+                # we are not paused, proceed as normal
+                sc.run(False) # run any pending actions
+
+            if self.paused == False and self.pause_event.is_set() == True:
+                # we have just now entered pause
+                self.control_signals.pausedSig.emit() # notify gui that we've paused
+                if self.segments[self.idx].segment_type == SegmentType.HOLD:
+                    # if we are in a hold, subtract the time we have already held
+                    #   from the prescribed hold time
+                    elapsed = time.monotonic() - self.segments[self.idx].entered
+                    self.segments[self.idx].time -= elapsed
+
+                    # clear everything from the scheduler queue
+                    sc.queue.clear()
+
+            elif self.paused == True and self.pause_event.is_set() == False:
+                # we have just been unpaused, so schedule the next change
+                self.schedule_next(sc)
+                self.control_signals.resumedSig.emit()
+
+            self.send_data() # let control thread know what's happening
+            time.sleep(LOOP_SLEEP_S)
+
+        # if we are here, we have reached the END segment or received a stop signal
+        sc.queue.clear() # clear remaining changes
+        self.eurotherm.active_setpoint = 0 # setpoint to below ambient
+
+        # if we weren't stopped, continue sending data
         while not self.stop_event.is_set():
-            if self.segments[self.index].segment_type != SegmentType.END:
-                pause = self.pause_event.is_set()
-                if not pause:
-                    # TODO handle scheduling, ramping, holding, etc
-                    pass
+            self.send_data()
 
-                if self.jump_event.is_set():
-                    self.index += 1
-                    self.jump_event.clear()
-
-        # TODO send status information to control thread
-        self.process_signals.dataSig.emit()
+        sys.exit() # close thread
