@@ -189,7 +189,7 @@
          </layout>
         </item>
         <item>
-         <widget class="QGroupBox" name="groupBox">
+         <widget class="QGroupBox" name="setPointGroupBox">
           <property name="enabled">
            <bool>false</bool>
           </property>
@@ -223,7 +223,7 @@
          </widget>
         </item>
         <item>
-         <widget class="QGroupBox" name="groupBox_2">
+         <widget class="QGroupBox" name="processValueGroupBox">
           <property name="title">
            <string>Process Value</string>
           </property>

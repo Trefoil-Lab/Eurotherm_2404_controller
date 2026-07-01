@@ -23,6 +23,7 @@ class Segment:
 
 @dataclass
 class Data:
+    time : float
     segment : Segment
     segment_index : int
     set_point : float
@@ -36,7 +37,7 @@ class GuiSignals(QObject):
     pauseSig = pyqtSignal()
     resumeSig = pyqtSignal()
     connectSig = pyqtSignal(str, int)
-    exitSign = pyqtSignal()
+    exitSig = pyqtSignal()
 
 class ControlSignals(QObject):
     connectingSig = pyqtSignal()

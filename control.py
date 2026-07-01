@@ -45,6 +45,7 @@ class ControlRunner(QRunnable):
         self.gui_signals.pauseSig.connect(self.pause)
         self.gui_signals.resumeSig.connect(self.resume)
         self.gui_signals.connectSig.connect(self.connect)
+        self.gui_signals.exitSig.connect(self.exit)
 
     def run(self):
         print('Control thread starting.')
@@ -56,12 +57,16 @@ class ControlRunner(QRunnable):
     # GUI event handlers #
     ######################
 
+    def exit(self):
+        self.eventloop.exit()
+
     def connect(self, eurotherm_port : str, eurotherm_addr : int,):
         self.signals.connectingSig.emit()
         self.eurotherm = Eurotherm2400(
             eurotherm_port,
             eurotherm_addr,
         )
+        self.status.connected = True
         self.signals.connectedSig.emit()
 
     def start(self):
@@ -86,6 +91,7 @@ class ControlRunner(QRunnable):
 
         self.stop_event.set()
         self.process_thread.join() # wait for process thread to stop
+        self.status.running = False
 
         self.signals.stoppedSig.emit()
 
@@ -124,9 +130,7 @@ class ControlRunner(QRunnable):
         
         self.signals.statusSig.emit(
             status, # status string
-            data.set_point,
-            data.process_value,
-            data.paused
+            data,
         )
 
 class ProcessRunner(Thread):
@@ -186,6 +190,7 @@ class ProcessRunner(Thread):
         # send status information to control thread
             self.process_signals.dataSig.emit(
                 Data(
+                    time.monotonic(),
                     self.segments[self.idx],
                     self.idx,
                     self.eurotherm.active_setpoint,

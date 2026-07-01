@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtCore import QSize, Qt, QThreadPool
+from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -26,6 +26,9 @@ WINDOW_TITLE = 'Eurotherm 2404 Controller'
 CONNECT_DIALOG_TITLE = 'Connection Details'
 SEGMENTS_DIALOG_TITLE = 'Configure Segments'
 
+SET_POINT_COLOR_STR = '#FF0000'
+PROCESS_VALUE_COLOR_STR = '#00FFFF'
+
 def main():
     app = QApplication(sys.argv)
 
@@ -45,10 +48,23 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self.setWindowTitle(WINDOW_TITLE)
 
+        self.setPointGroupBox.setStyleSheet(f'QGroupBox {{color: {SET_POINT_COLOR_STR}}}')
+        self.processValueGroupBox.setStyleSheet(f'QGroupBox {{color: {PROCESS_VALUE_COLOR_STR}}}')
+
+        # data
+        self.segPlotItem = None
+        self.pvPlotItem = None
+        self.spPlotItem = None
+        self.segments = [Segment(SegmentType.END, None, None, None, None)]
+        self.time = []
+        self.sp = [] # set points for plotting
+        self.pv = [] # process values for plotting
+
         # signals object
         self.gui_signals = GuiSignals()
 
         # create control runner
+        self.thread_pool = QtCore.QThreadPool()
         self.control_signals = ControlSignals()
         self.control = ControlRunner(self.gui_signals, self.control_signals)
 
@@ -63,6 +79,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.graph.setBackground(background=None)
         self.graph.setLabel('left', 'Temperature (°C)')
         self.graph.setLabel('bottom', 'Time (s)')
+        self.graph.setLimits(xMin=0, yMin=-10)
 
         # connect buttons to handlers
         self.segmentConfigButton.pressed.connect(self.segmentsConfigPress)
@@ -78,10 +95,54 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.control_signals.startedSig.connect(self.started)
         self.control_signals.stoppingSig.connect(self.stopping)
         self.control_signals.stoppedSig.connect(self.stopped)
+        self.control_signals.pausingSig.connect(self.pausing)
+        self.control_signals.pausedSig.connect(self.paused)
+        self.control_signals.resumingSig.connect(self.resuming)
+        self.control_signals.resumedSig.connect(self.resumed)
         self.control_signals.jumpingSig.connect(self.jumping)
         self.control_signals.jumpedSig.connect(self.jumped)
         self.control_signals.statusSig.connect(self.procStatus) # status updates
 
+        # start control thread
+        self.thread_pool.start(self.control)
+
+    ####################
+    # helper functions #
+    ####################
+
+    def graph_segments(self, start_idx : int, last_time : float | None = None, last_sp : float | None = None):
+        x = []
+        y = []
+
+        if last_time == None:
+            x.append(0)
+        else:
+            x.append(last_time)
+        
+        if last_sp != None:
+            y.append(last_sp)
+        elif self.control.status.connected:
+            y.append(self.control.eurotherm.process_value)
+        else:
+            y.append(0)
+        
+        for i in range(start_idx, len(self.segments)):
+            seg = self.segments[i]
+            match seg.segment_type:
+                case SegmentType.RAMP:
+                    y.append(seg.target)
+                    dur = abs(seg.target - y[i]) / seg.rate
+                    x.append(x[i] + dur)
+                case SegmentType.HOLD:
+                    y.append(y[i])
+                    x.append(x[i] + seg.time)
+
+        # remove existing segments graph if it exists
+        if self.segPlotItem != None:
+            self.graph.getPlotItem().removeItem(self.segPlotItem)
+        # plot the preview
+        self.segPlotItem =  self.graph.plot(x, y, pen=pg.mkPen(color='r', style=QtCore.Qt.PenStyle.DashLine))
+    
     #######################
     # user input handlers #
     #######################
@@ -103,7 +164,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg = SegmentDialog(self.segmentCountSpinBox.value(), self)
         dlg.exec()
 
-        # TODO graph segments preview
+        # graph segments preview
+        self.graph_segments(0)
 
     def jumpPress(self):
         self.jumpPushButton.setDisabled(True) # prevent multiple presses
@@ -117,17 +179,42 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def closeEvent(self, event):
         print('exiting...')
-        # TODO kill control thread
+        print('stopping process...')
+        self.gui_signals.stopSig.emit()
+        print('killing control thread...')
+        self.gui_signals.exitSig.emit()
         return super().closeEvent(event)
     
     ###################
     # signal handlers #
     ###################
 
-    def procStatus(self, time_rem : float, seg_count : int, data : Data):
-        # TODO receive status updates from control thread, display on status bar
-        # TODO graph process values / set points
-        pass
+    def procStatus(self, status : str, data : Data):
+        # receive status updates from control thread, display on status bar
+        self.statusbar.showMessage(status)
+
+        # update numerical display
+        self.setPointLcdNumber.display(data.set_point)
+        self.processValueLcdNumber.display(data.process_value)
+
+        # graph process values / set points
+        self.time.append(data.time)
+        self.sp.append(data.set_point)
+        self.pv.append(data.process_value)
+
+        # remove existing graphs if they exist
+        if self.pvPlotItem != None:
+            self.graph.getPlotItem().removeItem(self.pvPlotItem)
+        if self.spPlotItem != None:
+            self.graph.getPlotItem().removeItem(self.spPlotItem)
+
+        # plot new data graphs
+        self.graph.plot(self.time, self.sp, pen=pg.mkPen(color=SET_POINT_COLOR_STR))
+        self.graph.plot(self.time, self.pv, pen=pg.mkPen(color=PROCESS_VALUE_COLOR_STR))
+
+        # update segments preview
+        self.segments[data.segment_index] = data.segment # in case timing changed from pause
+        self.graph_segments(data.segment_index, data.time, data.set_point)
 
     def jumping(self):
         self.statusbar.showMessage('Jumping...')
@@ -148,6 +235,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def started(self):
         self.statusbar.showMessage('Started!', 1000)
+        self.setPointGroupBox.setDisabled(False)
+        self.setPointLcdNumber.setDisabled(False)
+        self.processValueGroupBox.setDisabled(False)
+        self.processValueLcdNumber.setDisabled(False)
 
     def stopping(self):
         self.statusbar.showMessage('Stopping...')
@@ -155,6 +246,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def stopped(self):
         self.statusbar.showMessage('Stopped!', 1000)
         self.segmentConfigButton.setDisabled(False)
+        self.setPointGroupBox.setDisabled(True)
+        self.setPointLcdNumber.setDisabled(True)
+        self.processValueGroupBox.setDisabled(True)
+        self.processValueLcdNumber.setDisabled(True)
 
     def pausing(self):
         self.statusbar.showMessage('Pausing...')
@@ -220,15 +315,17 @@ class SegmentDialog(QDialog, Ui_SegDialog):
                     seg_type, # type
                     seg.targetDoubleSpinBox.value(), # target value
                     seg.rateDoubleSpinBox.value(), # ramp rate
-                    seg.timeDoubleSpinBox.value() # hold time
+                    seg.timeDoubleSpinBox.value(), # hold time
+                    None # entered (used internally in process control)
                 )
             )
 
         # last item of segments list is end segment
-        segments.append(Segment(SegmentType.END, None, None, None))
+        segments.append(Segment(SegmentType.END, None, None, None, None))
 
         self.main_window.segments = segments
-        self.main_window.startStopPushButton.setDisabled(False)
+        if self.main_window.control.status.connected:
+            self.main_window.startStopPushButton.setDisabled(False)
 
         return super().accept()
 
